@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from pyprojroot import here
 import logging
-import os
 import json
 import pandas as pd
 
@@ -14,6 +13,7 @@ from src.ingestion import VectorDBIngestor
 from src.ingestion import BM25Ingestor
 from src.questions_processing import QuestionsProcessor
 from src.tables_serialization import TableSerializer
+from src import pdf_mineru  # add by gq [2026-04-30：接入MinerU解析模块]
 
 @dataclass
 class PipelineConfig:
@@ -163,29 +163,58 @@ class Pipeline:
         )
         print(f"Reports saved to {self.paths.merged_reports_path}")
 
+    # modified by gq [2026-04-30：简化Markdown导出，直接由规整后的每页JSON生成纯Markdown]
     def export_reports_to_markdown(self):
-        """导出规整后报告为markdown，便于人工复核"""
-        ptp = PageTextPreparation(use_serialized_tables=self.run_config.use_serialized_tables)
-        ptp.export_to_markdown(
-            reports_dir=self.paths.parsed_reports_path,
-            output_dir=self.paths.reports_markdown_path
-        )
-        print(f"Reports saved to {self.paths.reports_markdown_path}")
+        """导出规整后报告为markdown，便于人工复核和Markdown切分。"""
+        self.paths.reports_markdown_path.mkdir(parents=True, exist_ok=True)
+        report_paths = list(self.paths.merged_reports_path.glob("*.json"))
+        if not report_paths:
+            print(f"No merged reports found in {self.paths.merged_reports_path}")
+            return
 
+        for report_path in report_paths:
+            with open(report_path, "r", encoding="utf-8") as file:
+                report_data = json.load(file)
+
+            pages = report_data.get("content", {}).get("pages", [])
+            markdown_parts = []
+            for page in pages:
+                page_number = page.get("page", "")
+                page_text = page.get("text", "").strip()
+                markdown_parts.append(f"---\n\n# Page {page_number}\n\n{page_text}")
+
+            report_name = report_data.get("metainfo", {}).get("sha1_name") or report_path.stem
+            output_path = self.paths.reports_markdown_path / f"{report_name}.md"
+            with open(output_path, "w", encoding="utf-8") as file:
+                file.write("\n\n".join(markdown_parts).strip() + "\n")
+
+        print(f"Reports saved to {self.paths.reports_markdown_path}")
+    # mod end
+
+    # add by gq [2026-04-30：提供MinerU任务提交和结果获取入口]
+    def parse_pdf_reports_with_mineru(self):
+        """通过MinerU提交PDF解析任务，并把返回结果保存到解析目录。"""
+        self.paths.parsed_reports_path.mkdir(parents=True, exist_ok=True)
+        for pdf_path in self.paths.pdf_reports_dir.glob("*.pdf"):
+            task_id = pdf_mineru.get_task_id(str(pdf_path))
+            print(f"task_id: {task_id}")
+            output_path = self.paths.parsed_reports_path / f"{pdf_path.stem}.json"
+            pdf_mineru.get_result(task_id, output_path=str(output_path))
+        print(f"MinerU results saved to {self.paths.parsed_reports_path}")
+    # add end
+
+    # modified by gq [2026-04-30：默认对Markdown报告切分，保留表格参数兼容旧调用]
     def chunk_reports(self, include_serialized_tables: bool = False):
-        """将规整后报告分块，便于后续向量化和检索"""
+        """将Markdown报告分块，便于后续向量化和检索。"""
+        _ = include_serialized_tables
         text_splitter = TextSplitter()
-        
-        serialized_tables_dir = None
-        if include_serialized_tables:
-            serialized_tables_dir = self.paths.parsed_reports_path
-        
-        text_splitter.split_all_reports(
-            self.paths.merged_reports_path,
+        text_splitter.split_markdown_reports(
+            self.paths.reports_markdown_path,
             self.paths.documents_dir,
-            serialized_tables_dir
+            metadata_dir=self.paths.merged_reports_path
         )
         print(f"Chunked reports saved to {self.paths.documents_dir}")
+    # mod end
 
     def create_vector_dbs(self):
         """从分块报告创建向量数据库"""
@@ -483,8 +512,8 @@ configs = {"base": base_config,
 # 只需取消你想运行的方法的注释即可
 # 你也可以修改 run_config 以尝试不同的配置
 if __name__ == "__main__":
-    # 设置数据集根目录（此处以 test_set 为例）
-    root_path = here() / "data" / "test_set"
+    # 设置数据集根目录（此处以 stock_data 为例）
+    root_path = here() / "data" / "stock_data"
     #root_path = here("d:") / "test_set-rag"
     print('root_path:', root_path)
     #print(type(root_path))
