@@ -1,5 +1,4 @@
 import json
-import re
 import tiktoken
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -87,82 +86,7 @@ class TextSplitter():
                 "text": chunk
             })
         return chunks_with_meta
-    # add by gq [2026-04-30：支持直接对Markdown报告切分并输出检索所需JSON结构]
-    def _extract_page_number_from_markdown(self, markdown_text: str, default_page: int = 1) -> int:
-        match = re.search(r"^#\s+Page\s+(\d+)\s*$", markdown_text, flags=re.MULTILINE | re.IGNORECASE)
-        if match:
-            return int(match.group(1))
-        return default_page
-
-    def _split_markdown_page(self, page_number: int, page_text: str, chunk_size: int = 300, chunk_overlap: int = 50) -> List[Dict[str, any]]:
-        text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-            model_name="gpt-4o",
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
-        )
-        chunks = text_splitter.split_text(page_text)
-        chunks_with_meta = []
-        for chunk in chunks:
-            chunks_with_meta.append({
-                "page": page_number,
-                "length_tokens": self.count_tokens(chunk),
-                "text": chunk
-            })
-        return chunks_with_meta
-
-    def _load_markdown_metadata(self, markdown_path: Path, metadata_dir: Optional[Path]) -> Dict[str, any]:
-        if metadata_dir is not None:
-            metadata_path = metadata_dir / f"{markdown_path.stem}.json"
-            if metadata_path.exists():
-                with open(metadata_path, "r", encoding="utf-8") as file:
-                    metadata_report = json.load(file)
-                metainfo = metadata_report.get("metainfo", {})
-                if metainfo:
-                    return metainfo
-        return {
-            "sha1_name": markdown_path.stem,
-            "company_name": markdown_path.stem,
-        }
-
-    def split_markdown_file(self, markdown_path: Path, output_dir: Path, metadata_dir: Optional[Path] = None):
-        """切分单个Markdown报告，输出兼容向量化和检索的JSON文件。"""
-        markdown_text = markdown_path.read_text(encoding="utf-8")
-        raw_pages = [part.strip() for part in re.split(r"^---\s*$", markdown_text, flags=re.MULTILINE) if part.strip()]
-
-        pages = []
-        chunks = []
-        chunk_id = 0
-        for index, page_text in enumerate(raw_pages, start=1):
-            page_number = self._extract_page_number_from_markdown(page_text, default_page=index)
-            page_data = {"page": page_number, "text": page_text}
-            pages.append(page_data)
-
-            for chunk in self._split_markdown_page(page_number, page_text):
-                chunk["id"] = chunk_id
-                chunk["type"] = "content"
-                chunk_id += 1
-                chunks.append(chunk)
-
-        report = {
-            "metainfo": self._load_markdown_metadata(markdown_path, metadata_dir),
-            "content": {
-                "chunks": chunks,
-                "pages": pages,
-            }
-        }
-
-        output_dir.mkdir(parents=True, exist_ok=True)
-        with open(output_dir / f"{markdown_path.stem}.json", "w", encoding="utf-8") as file:
-            json.dump(report, file, indent=2, ensure_ascii=False)
-        return report
-
-    def split_markdown_reports(self, markdown_reports_dir: Path, output_dir: Path, metadata_dir: Optional[Path] = None):
-        """批量切分目录中的Markdown报告。"""
-        markdown_paths = list(markdown_reports_dir.glob("*.md"))
-        for markdown_path in markdown_paths:
-            self.split_markdown_file(markdown_path, output_dir, metadata_dir=metadata_dir)
-        print(f"已分块处理 {len(markdown_paths)} 个Markdown文件")
-    # add end
+    #对 json 文件分块，输出还是 json
     def split_all_reports(self, all_report_dir: Path, output_dir: Path, serialized_tables_dir: Optional[Path] = None):
         """
         批量处理目录下所有报告（json文件），对每个报告进行文本分块，并输出到目标目录。

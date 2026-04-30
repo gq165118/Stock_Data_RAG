@@ -64,9 +64,7 @@ class QuestionsProcessor:
         for result in retrieval_results:
             page_number = result['page']
             text = result['text']
-            report_name = result.get('report') or result.get('company_name')
-            source = f" from {report_name}" if report_name else ""
-            context_parts.append(f'Text retrieved{source} from page {page_number}: \n"""\n{text}\n"""')
+            context_parts.append(f'Text retrieved from page {page_number}: \n"""\n{text}\n"""')
             
         return "\n\n---\n\n".join(context_parts)
 
@@ -122,9 +120,8 @@ class QuestionsProcessor:
         
         return validated_pages
 
-    # modified by gq [2026-04-30：无公司名问题默认面向整个知识库检索]
-    def get_answer_for_company(self, company_name: Optional[str], question: str, schema: str) -> dict:
-        # 针对单个公司或整个知识库，检索上下文并调用LLM生成答案
+    def get_answer_for_company(self, company_name: str, question: str, schema: str) -> dict:
+        # 针对单个公司，检索上下文并调用LLM生成答案
         if self.llm_reranking:
             retriever = HybridRetriever(
                 vector_db_dir=self.vector_db_dir,
@@ -137,26 +134,15 @@ class QuestionsProcessor:
             )
 
         if self.full_context:
-            if company_name is None:
-                retrieval_results = retriever.retrieve_all_reports()
-            else:
-                retrieval_results = retriever.retrieve_all(company_name)
-        else:
-            if company_name is None:
-                retrieval_results = retriever.retrieve_by_query(
-                    query=question,
-                    llm_reranking_sample_size=self.llm_reranking_sample_size,
-                    top_n=self.top_n_retrieval,
-                    return_parent_pages=self.return_parent_pages
-                )
-            else:
-                retrieval_results = retriever.retrieve_by_company_name(
-                    company_name=company_name,
-                    query=question,
-                    llm_reranking_sample_size=self.llm_reranking_sample_size,
-                    top_n=self.top_n_retrieval,
-                    return_parent_pages=self.return_parent_pages
-                )
+            retrieval_results = retriever.retrieve_all(company_name)
+        else:           
+            retrieval_results = retriever.retrieve_by_company_name(
+                company_name=company_name,
+                query=question,
+                llm_reranking_sample_size=self.llm_reranking_sample_size,
+                top_n=self.top_n_retrieval,
+                return_parent_pages=self.return_parent_pages
+            )
         
         if not retrieval_results:
             raise ValueError("No relevant context found")
@@ -169,15 +155,11 @@ class QuestionsProcessor:
             model=self.answering_model
         )
         self.response_data = self.openai_processor.response_data
-        if self.new_challenge_pipeline and company_name is not None:
+        if self.new_challenge_pipeline:
             pages = answer_dict.get("relevant_pages", [])
             validated_pages = self._validate_page_references(pages, retrieval_results)
             answer_dict["relevant_pages"] = validated_pages
             answer_dict["references"] = self._extract_references(validated_pages, company_name)
-        elif self.new_challenge_pipeline:
-            pages = answer_dict.get("relevant_pages", [])
-            answer_dict["relevant_pages"] = self._validate_page_references(pages, retrieval_results)
-            answer_dict["references"] = []
         return answer_dict
 
     def _extract_companies_from_subset(self, question_text: str) -> list[str]:
@@ -209,10 +191,6 @@ class QuestionsProcessor:
             extracted_companies = re.findall(r'"([^"]*)"', question)
         
         if len(extracted_companies) == 0:
-            # add by gq [2026-04-30：kind=string支持不绑定单一公司的知识库问答]
-            if schema == "string":
-                return self.get_answer_for_company(company_name=None, question=question, schema=schema)
-            # add end
             raise ValueError("No company name found in the question.")
         
         if len(extracted_companies) == 1:

@@ -576,13 +576,6 @@ class APIProcessor:
                             if use_schema_prompt else prompts.AnswerWithRAGContextNamesPrompt.system_prompt)
             response_format = prompts.AnswerWithRAGContextNamesPrompt.AnswerSchema
             user_prompt = prompts.AnswerWithRAGContextNamesPrompt.user_prompt
-        # add by gq [2026-04-30：新增kind=string的开放文本RAG回答Prompt]
-        elif schema == "string":
-            system_prompt = (prompts.AnswerWithRAGContextStringPrompt.system_prompt_with_schema
-                            if use_schema_prompt else prompts.AnswerWithRAGContextStringPrompt.system_prompt)
-            response_format = prompts.AnswerWithRAGContextStringPrompt.AnswerSchema
-            user_prompt = prompts.AnswerWithRAGContextStringPrompt.user_prompt
-        # add end
         elif schema == "comparative":
             system_prompt = (prompts.ComparativeAnswerPrompt.system_prompt_with_schema
                             if use_schema_prompt else prompts.ComparativeAnswerPrompt.system_prompt)

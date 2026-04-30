@@ -262,60 +262,6 @@ class VectorRetriever:
             
         return retrieval_results
 
-    # add by gq [2026-04-30：支持不指定公司名的全知识库向量检索]
-    def retrieve_by_query(self, query: str, llm_reranking_sample_size: int = None, top_n: int = 3, return_parent_pages: bool = False) -> List[Dict]:
-        embedding = self._get_embedding(query)
-        embedding_array = np.array(embedding, dtype=np.float32).reshape(1, -1)
-
-        all_results = []
-        for report in self.all_dbs:
-            document = report["document"]
-            vector_db = report["vector_db"]
-            chunks = document["content"]["chunks"]
-            pages = document["content"]["pages"]
-            actual_top_n = min(top_n, len(chunks))
-            if actual_top_n == 0:
-                continue
-
-            distances, indices = vector_db.search(x=embedding_array, k=actual_top_n)
-            seen_pages = set()
-            for distance, index in zip(distances[0], indices[0]):
-                chunk = chunks[index]
-                parent_page = next(page for page in pages if page["page"] == chunk["page"])
-                if return_parent_pages:
-                    if parent_page["page"] in seen_pages:
-                        continue
-                    seen_pages.add(parent_page["page"])
-                    text = parent_page["text"]
-                    page = parent_page["page"]
-                else:
-                    text = chunk["text"]
-                    page = chunk["page"]
-                all_results.append({
-                    "distance": round(float(distance), 4),
-                    "page": page,
-                    "text": text,
-                    "report": report["name"],
-                    "company_name": document.get("metainfo", {}).get("company_name", report["name"])
-                })
-
-        return sorted(all_results, key=lambda result: result["distance"], reverse=True)[:top_n]
-
-    def retrieve_all_reports(self) -> List[Dict]:
-        all_pages = []
-        for report in self.all_dbs:
-            document = report["document"]
-            for page in sorted(document["content"]["pages"], key=lambda p: p["page"]):
-                all_pages.append({
-                    "distance": 0.5,
-                    "page": page["page"],
-                    "text": page["text"],
-                    "report": report["name"],
-                    "company_name": document.get("metainfo", {}).get("company_name", report["name"])
-                })
-        return all_pages
-    # add end
-
     def retrieve_all(self, company_name: str) -> List[Dict]:
         # 检索公司所有文本块，返回全部内容
         target_report = None
@@ -394,31 +340,3 @@ class HybridRetriever:
         )
         
         return reranked_results[:top_n]
-
-    # add by gq [2026-04-30：Hybrid检索器透传全知识库检索能力]
-    def retrieve_by_query(
-        self,
-        query: str,
-        llm_reranking_sample_size: int = 28,
-        documents_batch_size: int = 2,
-        top_n: int = 6,
-        llm_weight: float = 0.7,
-        return_parent_pages: bool = False
-    ) -> List[Dict]:
-        vector_results = self.vector_retriever.retrieve_by_query(
-            query=query,
-            top_n=llm_reranking_sample_size,
-            return_parent_pages=return_parent_pages
-        )
-        reranked_results = self.reranker.rerank_documents(
-            query=query,
-            documents=vector_results,
-            documents_batch_size=documents_batch_size,
-            llm_weight=llm_weight
-        )
-        return reranked_results[:top_n]
-
-    def retrieve_all_reports(self) -> List[Dict]:
-        return self.vector_retriever.retrieve_all_reports()
-    # add end
-
