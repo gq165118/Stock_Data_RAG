@@ -1,0 +1,75 @@
+{
+  "workbench.colorTheme": "Default Light Modern",
+  "workbench.colorCustomizations": {
+    "activityBar.background": "#f5f3f8",
+    "activityBar.foreground": "#51485f",
+    "activityBar.inactiveForeground": "#9c93a8",
+    "activityBarBadge.background": "#8d78b8",
+    "activityBarBadge.foreground": "#ffffff",
+
+    "titleBar.activeBackground": "#cdbce2",
+    "titleBar.activeForeground": "#2f2938",
+    "titleBar.inactiveBackground": "#ddd2ec",
+    "titleBar.inactiveForeground": "#665c72",
+
+    "commandCenter.background": "#d8cbe8",
+    "commandCenter.foreground": "#3b3346",
+    "commandCenter.border": "#b9a7cf",
+    "commandCenter.activeBackground": "#e5dcf0",
+
+    "sideBar.background": "#f6f6f8",
+    "sideBar.foreground": "#3f3f46",
+    "sideBar.border": "#dedee4",
+    "sideBarTitle.foreground": "#3f3f46",
+    "sideBarSectionHeader.background": "#f0f0f4",
+    "sideBarSectionHeader.foreground": "#3f3f46",
+
+    "list.activeSelectionBackground": "#e7e0f2",
+    "list.activeSelectionForeground": "#292431",
+    "list.inactiveSelectionBackground": "#eee9f6",
+    "list.hoverBackground": "#eeeeF2",
+    "list.focusBackground": "#e7e0f2",
+
+    "editor.background": "#eef8ea",
+    "editor.foreground": "#2f3a2f",
+    "editorLineNumber.foreground": "#9caf9a",
+    "editorLineNumber.activeForeground": "#6f8f69",
+    "editorCursor.foreground": "#8b74b3",
+    "editor.selectionBackground": "#cde8c6",
+    "editor.inactiveSelectionBackground": "#dcefd7",
+    "editor.lineHighlightBackground": "#e4f3df",
+    "editorIndentGuide.background1": "#d7e8d1",
+    "editorIndentGuide.activeBackground1": "#aec9a6",
+
+    "tab.activeBackground": "#eef8ea",
+    "tab.activeForeground": "#2f3a2f",
+    "tab.inactiveBackground": "#f3f1f7",
+    "tab.inactiveForeground": "#6b6574",
+    "tab.border": "#dedee4",
+    "editorGroupHeader.tabsBackground": "#f3f1f7",
+    "editorGroupHeader.tabsBorder": "#dedee4",
+
+    "panel.background": "#ffffff",
+    "panel.border": "#dedee4",
+    "panelTitle.activeForeground": "#4f3f78",
+    "panelTitle.inactiveForeground": "#77717f",
+
+    "terminal.background": "#ffffff",
+    "terminal.foreground": "#24292f",
+    "terminalCursor.foreground": "#6f55a0",
+
+    "statusBar.background": "#8b74b3",
+    "statusBar.foreground": "#ffffff",
+    "statusBar.noFolderBackground": "#8b74b3",
+    "statusBar.debuggingBackground": "#b35b86",
+    "statusBar.debuggingForeground": "#ffffff"
+  },
+  "editor.tokenColorCustomizations": {
+    "comments": "#78926f",
+    "strings": "#4f8a55",
+    "keywords": "#6f42c1",
+    "functions": "#005cc5",
+    "variables": "#2f3a2f",
+    "numbers": "#b4764f"
+  }
+}

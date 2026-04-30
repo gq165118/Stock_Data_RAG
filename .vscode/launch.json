@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug process-questions minimax",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/data/test_set",
+            "envFile": "${workspaceFolder}/.env",
+            "args": [
+                "process-questions",
+                "--config",
+                "minimax"
+            ],
+            "python": "${workspaceFolder}/.venv312/Scripts/python.exe",
+            "justMyCode": false
+        }
+    ]
+}

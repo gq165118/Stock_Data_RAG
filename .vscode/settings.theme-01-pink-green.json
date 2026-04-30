@@ -1,0 +1,35 @@
+{
+  "workbench.colorTheme": "Default Light Modern",
+  "workbench.colorCustomizations": {
+    "activityBar.background": "#f7dce8",
+    "activityBar.foreground": "#5b4a54",
+    "sideBar.background": "#fbe4ee",
+    "sideBar.foreground": "#4f3f47",
+    "sideBarSectionHeader.background": "#f6d3e2",
+    "list.activeSelectionBackground": "#dfeeda",
+    "list.hoverBackground": "#f4d9e6",
+    "editor.background": "#eef8ea",
+    "editor.foreground": "#2f3a2f",
+    "editorLineNumber.foreground": "#9caf9a",
+    "editorCursor.foreground": "#d86b9f",
+    "editor.selectionBackground": "#cde8c6",
+    "editor.lineHighlightBackground": "#e4f3df",
+    "tab.activeBackground": "#eef8ea",
+    "tab.inactiveBackground": "#f7dce8",
+    "editorGroupHeader.tabsBackground": "#f7dce8",
+    "titleBar.activeBackground": "#f7dce8",
+    "titleBar.activeForeground": "#4f3f47",
+    "statusBar.background": "#f0cbdc",
+    "statusBar.foreground": "#4f3f47",
+    "panel.background": "#f4faef",
+    "terminal.background": "#eef8ea",
+    "terminal.foreground": "#2f3a2f"
+  },
+  "editor.tokenColorCustomizations": {
+    "comments": "#78926f",
+    "strings": "#4f8a55",
+    "keywords": "#b05a8d",
+    "functions": "#4f7f9f",
+    "numbers": "#b4764f"
+  }
+}
