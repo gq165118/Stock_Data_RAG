@@ -55,8 +55,13 @@ class BM25Ingestor:
 # VectorDBIngestor：向量库构建与保存工具
 class VectorDBIngestor:
     def __init__(self):
-        # 初始化DashScope API Key
-        dashscope.api_key = os.getenv("DASHSCOPE_API_KEY")
+        # modified by gq [2026-04-30：强制读取项目.env覆盖旧进程环境变量]
+        load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
+        dashscope_api_key = os.getenv("DASHSCOPE_API_KEY")
+        if not dashscope_api_key:
+            raise ValueError("未找到DASHSCOPE_API_KEY，请在项目.env文件或当前终端环境变量中配置DashScope API Key。")
+        dashscope.api_key = dashscope_api_key
+        # mod end
 
     @retry(wait=wait_fixed(20), stop=stop_after_attempt(2))
     def _get_embeddings(self, text: Union[str, List[str]], model: str = "text-embedding-v1") -> List[float]:
@@ -94,6 +99,17 @@ class VectorDBIngestor:
             #     f.write('i='+str(i)+'\n')
             #     f.write('resp='+str(resp)+'\n')
             # 兼容单条和多条输入
+            # add by gq [2026-04-30：提前暴露DashScope异常响应，避免NoneType掩盖真实错误]
+            if not resp or resp.get('output') is None:
+                status_code = resp.get('status_code') if resp else None
+                code = resp.get('code') if resp else None
+                message = resp.get('message') if resp else None
+                request_id = resp.get('request_id') if resp else None
+                raise RuntimeError(
+                    f"DashScope embedding API调用失败: status_code={status_code}, "
+                    f"code={code}, message={message}, request_id={request_id}"
+                )
+            # add end
             if 'output' in resp and 'embeddings' in resp['output']:
                 print('11111111')
                 for emb in resp['output']['embeddings']:

@@ -336,6 +336,49 @@ class AnswerWithRAGContextNamesPrompt:
 
     system_prompt_with_schema = build_system_prompt(instruction, example, pydantic_schema)
 
+# add by gq [2026-04-30：支持投研知识库开放文本类问题]
+class AnswerWithRAGContextStringPrompt:
+    instruction = """
+你是一个面向投研报告知识库的RAG问答系统。
+你的任务是仅基于检索到的投研报告上下文，回答开放文本类问题。
+
+要求：
+- 只使用上下文中的信息，不引入外部知识。
+- 回答要结构清晰、事实完整，适合中文投研问答场景。
+- 如果上下文不足以回答，final_answer 返回 'N/A'。
+- 如上下文存在多份报告观点，请综合归纳，并说明关键依据。
+"""
+    user_prompt = AnswerWithRAGContextSharedPrompt.user_prompt
+
+    class AnswerSchema(BaseModel):
+        step_by_step_analysis: str = Field(description="详细分步分析过程，说明如何从上下文定位和归纳答案。")
+        reasoning_summary: str = Field(description="简要总结推理过程，约50字。")
+        relevant_pages: List[int] = Field(description="直接用于回答问题的页面编号列表。")
+        final_answer: Union[str, Literal["N/A"]] = Field(description="面向用户的中文答案；若上下文不足，返回'N/A'。")
+
+    pydantic_schema = re.sub(r"^ {4}", "", inspect.getsource(AnswerSchema), flags=re.MULTILINE)
+
+    example = r"""
+示例：
+问题：
+"公司在行业中的竞争优势是什么？"
+
+答案：
+```
+{
+  "step_by_step_analysis": "1. 问题询问竞争优势，需要查找行业地位、技术、客户、产能等信息。\n2. 上下文第3页说明公司具备先进制程能力。\n3. 第5页说明公司客户覆盖广泛。\n4. 第8页提到产能利用率提升。\n5. 因此可从技术、客户和产能三方面回答。",
+  "reasoning_summary": "上下文从技术能力、客户覆盖和产能利用率三方面支持竞争优势判断。",
+  "relevant_pages": [3, 5, 8],
+  "final_answer": "公司竞争优势主要体现在先进制程能力、广泛客户基础和产能利用率提升三个方面。"
+}
+```
+"""
+
+    system_prompt = build_system_prompt(instruction, example)
+    system_prompt_with_schema = build_system_prompt(instruction, example, pydantic_schema)
+# add end
+
+
 class ComparativeAnswerPrompt:
     instruction = """
 你是一个问答系统。

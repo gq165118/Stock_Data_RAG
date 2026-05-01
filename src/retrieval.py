@@ -91,7 +91,9 @@ class VectorRetriever:
 
     def _set_up_llm(self):
         # 根据 embedding_provider 初始化对应的 LLM 客户端
-        load_dotenv()
+        # modified by gq [2026-04-30：强制读取项目.env覆盖旧进程环境变量]
+        load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
+        # mod end
         if self.embedding_provider == "openai":
             llm = OpenAI(
                 api_key=os.getenv("OPENAI_API_KEY"),
@@ -120,27 +122,42 @@ class VectorRetriever:
                 model="text-embedding-v1",
                 input=[text]
             )
+            # add by gq [2026-04-30：提前暴露DashScope异常响应，避免NoneType掩盖真实错误]
+            if not rsp or rsp.get('output') is None:
+                status_code = rsp.get('status_code') if rsp else None
+                code = rsp.get('code') if rsp else None
+                message = rsp.get('message') if rsp else None
+                request_id = rsp.get('request_id') if rsp else None
+                raise RuntimeError(
+                    f"DashScope embedding API调用失败: status_code={status_code}, "
+                    f"code={code}, message={message}, request_id={request_id}"
+                )
+            # add end
             # 兼容 dashscope 返回格式，不能用 resp.output，需用 resp['output']
-            if 'output' in rsp and 'embeddings' in rsp['output']:
+            # modified by gq [2026-04-30：复用已校验的output对象，避免重复判断output存在性]
+            if 'embeddings' in rsp['output']:
                 # 多条输入（本处只有一条）
                 emb = rsp['output']['embeddings'][0]
                 if emb['embedding'] is None or len(emb['embedding']) == 0:
                     raise RuntimeError(f"DashScope返回的embedding为空，text_index={emb.get('text_index', None)}")
                 return emb['embedding']
-            elif 'output' in rsp and 'embedding' in rsp['output']:
+            elif 'embedding' in rsp['output']:
                 # 兼容单条输入格式
                 if rsp['output']['embedding'] is None or len(rsp['output']['embedding']) == 0:
                     raise RuntimeError("DashScope返回的embedding为空")
                 return rsp['output']['embedding']
             else:
                 raise RuntimeError(f"DashScope embedding API返回格式异常: {rsp}")
+            # mod end
         else:
             raise ValueError(f"不支持的 embedding provider: {self.embedding_provider}")
 
     @staticmethod
     def set_up_llm():
         # 静态方法，初始化OpenAI LLM
-        load_dotenv()
+        # modified by gq [2026-04-30：强制读取项目.env覆盖旧进程环境变量]
+        load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
+        # mod end
         llm = OpenAI(
             api_key=os.getenv("OPENAI_API_KEY"),
             timeout=None,
@@ -262,6 +279,60 @@ class VectorRetriever:
             
         return retrieval_results
 
+    # add by gq [2026-04-30：支持不指定公司名的全知识库向量检索]
+    def retrieve_by_query(self, query: str, llm_reranking_sample_size: int = None, top_n: int = 3, return_parent_pages: bool = False) -> List[Dict]:
+        embedding = self._get_embedding(query)
+        embedding_array = np.array(embedding, dtype=np.float32).reshape(1, -1)
+
+        all_results = []
+        for report in self.all_dbs:
+            document = report["document"]
+            vector_db = report["vector_db"]
+            chunks = document["content"]["chunks"]
+            pages = document["content"]["pages"]
+            actual_top_n = min(top_n, len(chunks))
+            if actual_top_n == 0:
+                continue
+
+            distances, indices = vector_db.search(x=embedding_array, k=actual_top_n)
+            seen_pages = set()
+            for distance, index in zip(distances[0], indices[0]):
+                chunk = chunks[index]
+                parent_page = next(page for page in pages if page["page"] == chunk["page"])
+                if return_parent_pages:
+                    if parent_page["page"] in seen_pages:
+                        continue
+                    seen_pages.add(parent_page["page"])
+                    text = parent_page["text"]
+                    page = parent_page["page"]
+                else:
+                    text = chunk["text"]
+                    page = chunk["page"]
+                all_results.append({
+                    "distance": round(float(distance), 4),
+                    "page": page,
+                    "text": text,
+                    "report": report["name"],
+                    "company_name": document.get("metainfo", {}).get("company_name", report["name"])
+                })
+
+        return sorted(all_results, key=lambda result: result["distance"], reverse=True)[:top_n]
+
+    def retrieve_all_reports(self) -> List[Dict]:
+        all_pages = []
+        for report in self.all_dbs:
+            document = report["document"]
+            for page in sorted(document["content"]["pages"], key=lambda p: p["page"]):
+                all_pages.append({
+                    "distance": 0.5,
+                    "page": page["page"],
+                    "text": page["text"],
+                    "report": report["name"],
+                    "company_name": document.get("metainfo", {}).get("company_name", report["name"])
+                })
+        return all_pages
+    # add end
+
     def retrieve_all(self, company_name: str) -> List[Dict]:
         # 检索公司所有文本块，返回全部内容
         target_report = None
@@ -340,3 +411,31 @@ class HybridRetriever:
         )
         
         return reranked_results[:top_n]
+
+    # add by gq [2026-04-30：Hybrid检索器透传全知识库检索能力]
+    def retrieve_by_query(
+        self,
+        query: str,
+        llm_reranking_sample_size: int = 28,
+        documents_batch_size: int = 2,
+        top_n: int = 6,
+        llm_weight: float = 0.7,
+        return_parent_pages: bool = False
+    ) -> List[Dict]:
+        vector_results = self.vector_retriever.retrieve_by_query(
+            query=query,
+            top_n=llm_reranking_sample_size,
+            return_parent_pages=return_parent_pages
+        )
+        reranked_results = self.reranker.rerank_documents(
+            query=query,
+            documents=vector_results,
+            documents_batch_size=documents_batch_size,
+            llm_weight=llm_weight
+        )
+        return reranked_results[:top_n]
+
+    def retrieve_all_reports(self) -> List[Dict]:
+        return self.vector_retriever.retrieve_all_reports()
+    # add end
+

@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from pyprojroot import here
 import logging
-import os
 import json
 import pandas as pd
 
@@ -14,6 +13,7 @@ from src.ingestion import VectorDBIngestor
 from src.ingestion import BM25Ingestor
 from src.questions_processing import QuestionsProcessor
 from src.tables_serialization import TableSerializer
+from src import pdf_mineru  # add by gq [2026-04-30：接入MinerU解析模块]
 
 @dataclass
 class PipelineConfig:
@@ -67,7 +67,7 @@ class RunConfig:
     config_suffix: str = ""
 
 class Pipeline:
-    def __init__(self, root_path: Path, subset_name: str = "subset.csv", questions_file_name: str = "questions-1.json", pdf_reports_dir_name: str = "pdf_reports", run_config: RunConfig = RunConfig()):
+    def __init__(self, root_path: Path, subset_name: str = "subset.csv", questions_file_name: str = "questions.json", pdf_reports_dir_name: str = "pdf_reports", run_config: RunConfig = RunConfig()):
         # 初始化主流程，加载路径和配置
         self.run_config = run_config
         self.paths = self._initialize_paths(root_path, subset_name, questions_file_name, pdf_reports_dir_name)
@@ -163,29 +163,58 @@ class Pipeline:
         )
         print(f"Reports saved to {self.paths.merged_reports_path}")
 
+    # modified by gq [2026-04-30：简化Markdown导出，直接由规整后的每页JSON生成纯Markdown]
     def export_reports_to_markdown(self):
-        """导出规整后报告为markdown，便于人工复核"""
-        ptp = PageTextPreparation(use_serialized_tables=self.run_config.use_serialized_tables)
-        ptp.export_to_markdown(
-            reports_dir=self.paths.parsed_reports_path,
-            output_dir=self.paths.reports_markdown_path
-        )
-        print(f"Reports saved to {self.paths.reports_markdown_path}")
+        """导出规整后报告为markdown，便于人工复核和Markdown切分。"""
+        self.paths.reports_markdown_path.mkdir(parents=True, exist_ok=True)
+        report_paths = list(self.paths.merged_reports_path.glob("*.json"))
+        if not report_paths:
+            print(f"No merged reports found in {self.paths.merged_reports_path}")
+            return
 
+        for report_path in report_paths:
+            with open(report_path, "r", encoding="utf-8") as file:
+                report_data = json.load(file)
+
+            pages = report_data.get("content", {}).get("pages", [])
+            markdown_parts = []
+            for page in pages:
+                page_number = page.get("page", "")
+                page_text = page.get("text", "").strip()
+                markdown_parts.append(f"---\n\n# Page {page_number}\n\n{page_text}")
+
+            report_name = report_data.get("metainfo", {}).get("sha1_name") or report_path.stem
+            output_path = self.paths.reports_markdown_path / f"{report_name}.md"
+            with open(output_path, "w", encoding="utf-8") as file:
+                file.write("\n\n".join(markdown_parts).strip() + "\n")
+
+        print(f"Reports saved to {self.paths.reports_markdown_path}")
+    # mod end
+
+    # add by gq [2026-04-30：提供MinerU任务提交和结果获取入口]
+    def parse_pdf_reports_with_mineru(self):
+        """通过MinerU提交PDF解析任务，并把返回结果保存到解析目录。"""
+        self.paths.parsed_reports_path.mkdir(parents=True, exist_ok=True)
+        for pdf_path in self.paths.pdf_reports_dir.glob("*.pdf"):
+            task_id = pdf_mineru.get_task_id(str(pdf_path))
+            print(f"task_id: {task_id}")
+            output_path = self.paths.parsed_reports_path / f"{pdf_path.stem}.json"
+            pdf_mineru.get_result(task_id, output_path=str(output_path))
+        print(f"MinerU results saved to {self.paths.parsed_reports_path}")
+    # add end
+
+    # modified by gq [2026-04-30：默认对Markdown报告切分，保留表格参数兼容旧调用]
     def chunk_reports(self, include_serialized_tables: bool = False):
-        """将规整后报告分块，便于后续向量化和检索"""
+        """将Markdown报告分块，便于后续向量化和检索。"""
+        _ = include_serialized_tables
         text_splitter = TextSplitter()
-        
-        serialized_tables_dir = None
-        if include_serialized_tables:
-            serialized_tables_dir = self.paths.parsed_reports_path
-        
-        text_splitter.split_all_reports(
-            self.paths.merged_reports_path,
+        text_splitter.split_markdown_reports(
+            self.paths.reports_markdown_path,
             self.paths.documents_dir,
-            serialized_tables_dir
+            metadata_dir=self.paths.merged_reports_path
         )
         print(f"Chunked reports saved to {self.paths.documents_dir}")
+    # mod end
 
     def create_vector_dbs(self):
         """从分块报告创建向量数据库"""
@@ -484,41 +513,44 @@ configs = {"base": base_config,
 # 你也可以修改 run_config 以尝试不同的配置
 if __name__ == "__main__":
     # 设置数据集根目录（此处以 test_set 为例）
+    # modified by gq [2026-04-30：恢复使用已完成解析的test_set数据目录]
     root_path = here() / "data" / "test_set"
+    # mod end
     #root_path = here("d:") / "test_set-rag"
     print('root_path:', root_path)
     #print(type(root_path))
     # 初始化主流程，使用推荐的最佳配置
     #pipeline = Pipeline(root_path, run_config=max_nst_o3m_config)
     pipeline = Pipeline(root_path, run_config=kimi_config)
+    #pipeline = Pipeline(root_path, run_config=minimax_config)
     
     # 以下方法可按需取消注释，逐步运行各流程：
     # 1. 解析PDF报告为结构化JSON，输出到 debug/data_01_parsed_reports
     #    同时保存docling原始输出到 debug/data_01_parsed_reports_debug（含大量元数据，后续流程不使用）
     print('1. 解析PDF报告为结构化JSON，输出到 debug/data_01_parsed_reports')
-    pipeline.parse_pdf_reports_sequential() 
+    #pipeline.parse_pdf_reports_sequential() 
     
     # 2. 仅在需要表格序列化配置时调用，
     #    会在 debug/data_01_parsed_reports 的每个表格中新增 "serialized_table" 字段
     print('2. 序列化表格，输出到 debug/data_01_parsed_reports')
-    pipeline.serialize_tables(max_workers=5) 
+    #pipeline.serialize_tables(max_workers=5) 
     
     # 3. 将解析后的JSON规整为更简单的每页markdown结构，输出到 debug/data_02_merged_reports
     print('3. 将解析后的JSON规整为更简单的每页markdown结构，输出到 debug/data_02_merged_reports')
-    pipeline.merge_reports() 
+    #pipeline.merge_reports() 
 
     # 4. 导出规整后报告为纯markdown文本，仅用于人工复核或全文检索（如 gemini_thinking_config）
     #    新文件在 debug/data_03_reports_markdown
     print('4. 导出规整后报告为纯markdown文本，仅用于人工复核或全文检索（如 gemini_thinking_config）')
-    pipeline.export_reports_to_markdown() 
+    #pipeline.export_reports_to_markdown() 
     
     # 5. 将规整后报告分块，便于后续向量化，输出到 databases/chunked_reports
     print('5. 将规整后报告分块，便于后续向量化，输出到 databases/chunked_reports')
-    pipeline.chunk_reports() 
+    #pipeline.chunk_reports() 
     
     # 6. 从分块报告创建向量数据库，输出到 databases/vector_dbs
     print('6. 从分块报告创建向量数据库，输出到 databases/vector_dbs')
-    pipeline.create_vector_dbs()     
+    #pipeline.create_vector_dbs()     
     
     # 7. 处理问题并生成答案，具体逻辑取决于 run_config
     print('7. 处理问题并生成答案，具体逻辑取决于 run_config')

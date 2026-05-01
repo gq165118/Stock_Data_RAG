@@ -5,6 +5,8 @@ data/erc2_set/databases_ser_tab/
 
 # add by gq [2026-04-30：忽略本地虚拟环境和数据处理生成文件]
 .venv312/
+.cursor/
+.env
 data/*/pdf_reports/
 data/*/debug_data/
 data/*/databases/
