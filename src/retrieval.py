@@ -91,7 +91,9 @@ class VectorRetriever:
 
     def _set_up_llm(self):
         # 根据 embedding_provider 初始化对应的 LLM 客户端
-        load_dotenv()
+        # modified by gq [2026-04-30：强制读取项目.env覆盖旧进程环境变量]
+        load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
+        # mod end
         if self.embedding_provider == "openai":
             llm = OpenAI(
                 api_key=os.getenv("OPENAI_API_KEY"),
@@ -120,27 +122,42 @@ class VectorRetriever:
                 model="text-embedding-v1",
                 input=[text]
             )
+            # add by gq [2026-04-30：提前暴露DashScope异常响应，避免NoneType掩盖真实错误]
+            if not rsp or rsp.get('output') is None:
+                status_code = rsp.get('status_code') if rsp else None
+                code = rsp.get('code') if rsp else None
+                message = rsp.get('message') if rsp else None
+                request_id = rsp.get('request_id') if rsp else None
+                raise RuntimeError(
+                    f"DashScope embedding API调用失败: status_code={status_code}, "
+                    f"code={code}, message={message}, request_id={request_id}"
+                )
+            # add end
             # 兼容 dashscope 返回格式，不能用 resp.output，需用 resp['output']
-            if 'output' in rsp and 'embeddings' in rsp['output']:
+            # modified by gq [2026-04-30：复用已校验的output对象，避免重复判断output存在性]
+            if 'embeddings' in rsp['output']:
                 # 多条输入（本处只有一条）
                 emb = rsp['output']['embeddings'][0]
                 if emb['embedding'] is None or len(emb['embedding']) == 0:
                     raise RuntimeError(f"DashScope返回的embedding为空，text_index={emb.get('text_index', None)}")
                 return emb['embedding']
-            elif 'output' in rsp and 'embedding' in rsp['output']:
+            elif 'embedding' in rsp['output']:
                 # 兼容单条输入格式
                 if rsp['output']['embedding'] is None or len(rsp['output']['embedding']) == 0:
                     raise RuntimeError("DashScope返回的embedding为空")
                 return rsp['output']['embedding']
             else:
                 raise RuntimeError(f"DashScope embedding API返回格式异常: {rsp}")
+            # mod end
         else:
             raise ValueError(f"不支持的 embedding provider: {self.embedding_provider}")
 
     @staticmethod
     def set_up_llm():
         # 静态方法，初始化OpenAI LLM
-        load_dotenv()
+        # modified by gq [2026-04-30：强制读取项目.env覆盖旧进程环境变量]
+        load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
+        # mod end
         llm = OpenAI(
             api_key=os.getenv("OPENAI_API_KEY"),
             timeout=None,
