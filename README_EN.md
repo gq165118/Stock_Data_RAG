@@ -105,6 +105,21 @@ Typical stage flow:
 
 You can control stage execution through settings in `src/pipeline.py`.
 
+Run the Streamlit UI:
+
+```bash
+streamlit run .\app.py
+```
+
+Default URL: `http://localhost:8501`
+
+UI features:
+
+- Automatic multi-dataset discovery from `data/*`
+- Full-corpus or company-scoped retrieval
+- LLM reranking enabled by default (toggle-able)
+- Answer panel + debug panel (params, elapsed time, raw JSON)
+
 ---
 
 ## 6. Stability Improvements Included

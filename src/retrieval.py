@@ -288,11 +288,16 @@ class VectorRetriever:
                     }
                     retrieval_results.append(result)
             else:
+                # modified by gq [2026-05-04：兼容按行分块数据无page字段时回退到start_line]
+                fallback_page = chunk.get("page")
+                if fallback_page is None:
+                    fallback_page = chunk.get("start_line")
                 result = {
                     "distance": distance,
-                    "page": chunk["page"],
+                    "page": fallback_page,
                     "text": chunk["text"]
                 }
+                # mod end
                 retrieval_results.append(result)
             
         return retrieval_results
@@ -326,7 +331,9 @@ class VectorRetriever:
                     page = parent_page["page"]
                 else:
                     text = chunk["text"]
-                    page = chunk["page"]
+                    page = chunk.get("page")
+                    if page is None:
+                        page = chunk.get("start_line")  # modified by gq [2026-05-04：兼容按行分块数据无page字段]
                 all_results.append({
                     "distance": round(float(distance), 4),
                     "page": page,
@@ -377,10 +384,10 @@ class VectorRetriever:
             pages = [{"page": c.get("page"), "text": c.get("text", "")} for c in document["content"].get("chunks", [])]
         
         all_pages = []
-        for page in sorted(pages, key=lambda p: p["page"]):
+        for page in sorted(pages, key=lambda p: p.get("page") or p.get("start_line") or 0):
             result = {
                 "distance": 0.5,
-                "page": page["page"],
+                "page": page.get("page") if page.get("page") is not None else page.get("start_line"),
                 "text": page["text"]
             }
             all_pages.append(result)

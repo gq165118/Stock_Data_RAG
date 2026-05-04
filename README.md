@@ -108,6 +108,21 @@ python -m src.pipeline
 5. 构建向量库（`vector_dbs`）
 6. 执行问题问答并输出 `answers_*.json`
 
+### 5.3 启动 RAG 可视化界面（Streamlit）
+
+```bash
+streamlit run .\app.py
+```
+
+默认访问地址：`http://localhost:8501`
+
+界面能力：
+
+- 多数据集自动发现（`data/*`）
+- 全库检索或按公司检索
+- 默认开启 LLM 重排（可关闭）
+- 答案结果 + 调试信息面板（检索参数、耗时、原始JSON）
+
 ---
 
 ## 6. 当前已修复的关键问题（摘要）
@@ -134,7 +149,8 @@ python -m src.pipeline
 
 ### Q2：为什么会出现 DashScope 报错？
 通常是某条子链路（常见是 rerank）仍走默认 DashScope。请检查 `RERANK_PROVIDER` / `EMBEDDING_PROVIDER` 与代码默认值是否一致。
-
+### Q3：`git push` 的 HTTPS 失败（connection reset）
+在部分网络环境下 443 不稳定，可切换远端到 SSH：
 
 ```bash
 git remote set-url origin git@github.com:<your-username>/<repo>.git
