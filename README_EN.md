@@ -1,48 +1,46 @@
-# RAG-gq Project Overview (English)
+# RAG-gq (English)
 
 [中文](./README.md) | [English](./README_EN.md)
 
-This repository is a practical RAG (Retrieval-Augmented Generation) project for question answering over enterprise reports (annual reports, research reports, investor documents). It supports a full pipeline from PDF parsing to final answers:
+`RAG-gq` is a practical RAG project for enterprise report QA (annual reports, research reports, investor documents). It provides an end-to-end pipeline from PDF parsing to final answers.
 
-- PDF parsing (Docling / MinerU)
-- Report normalization (page-level JSON)
-- Markdown export and chunking
-- Vector database ingestion
-- Retrieval + optional LLM reranking
-- Final QA generation
+Typical use cases:
 
-The current version has been stabilized around the `data/stock_data` example workflow.
+- Enterprise knowledge QA prototypes
+- Multi-document retrieval with evidence grounding
+- RAG strategy experiments (retrieval, reranking, prompting)
 
----
+## What it can do
 
-## 1. Repository Structure
+- PDF parsing via Docling or MinerU
+- Parsed report normalization into unified text structures
+- Vector retrieval (full-corpus or company-scoped)
+- Optional LLM reranking
+- Structured answer schemas (`string`, `boolean`, `number`, `name`, `names`)
+- Streamlit UI with debug panel
+
+## Project structure
 
 ```text
 RAG-gq/
 ├─ src/
 │  ├─ pipeline.py
-│  ├─ pdf_mineru.py
-│  ├─ parsed_reports_merging.py
-│  ├─ text_splitter.py
-│  ├─ ingestion.py
 │  ├─ retrieval.py
 │  ├─ reranking.py
 │  ├─ questions_processing.py
-│  └─ api_requests.py
+│  ├─ ingestion.py
+│  └─ ...
 ├─ data/
 │  ├─ stock_data/
 │  └─ test_set/
 ├─ docs/
-│  └─ notes/
-├─ requirements.txt
-└─ README.md
+├─ app.py
+└─ requirements.txt
 ```
 
----
+## Quick start
 
-## 2. Environment Setup
-
-Recommended: Python 3.12
+### 1) Install environment
 
 ```bash
 python -m venv .venv312
@@ -50,109 +48,79 @@ python -m venv .venv312
 pip install -r requirements.txt
 ```
 
----
+### 2) Configure `.env`
 
-## 3. `.env` Configuration
-
-This project is configuration-driven. For your current setup, Agicto is used as the main provider.
-
-Key variables:
+Minimum settings (Agicto example):
 
 - `AGICTO_API_KEY`
 - `AGICTO_BASE_URL`
-- `AGICTO_CHAT_MODEL` (e.g. `deepseek-v4-flash`)
+- `AGICTO_CHAT_MODEL`
 - `EMBEDDING_PROVIDER=agicto`
-- `AGICTO_EMBEDDING_MODEL` (embedding model)
-- `RERANK_PROVIDER=agicto` (optional)
-- `RERANK_MODEL` (optional; falls back to `AGICTO_CHAT_MODEL`)
 
-For MinerU parsing:
+Recommended optional settings:
+
+- `AGICTO_EMBEDDING_MODEL`
+- `RERANK_PROVIDER=agicto`
+- `RERANK_MODEL` (falls back to `AGICTO_CHAT_MODEL` if omitted)
+
+If using MinerU parsing, also configure:
 
 - `MINERU_API_KEY`
 - `MINERU_SUBMIT_URL`
 - `MINERU_RESULT_URL_TEMPLATE`
 
----
+## Running the project
 
-## 4. Data and Reproducibility
-
-`data/stock_data/` contains a runnable example dataset:
-
-- `questions.json` (input questions)
-- `pdf_reports/` (source PDFs)
-- `answers_*.json` (generated outputs)
-
-Intermediate artifacts (`debug_data`, `databases`, etc.) are ignored by `.gitignore` to keep the repo manageable.
-
----
-
-## 5. How to Run
-
-Run the main pipeline:
+### Option A: main pipeline
 
 ```bash
 python -m src.pipeline
 ```
 
-Typical stage flow:
+Typical flow:
 
 1. Parse PDFs
-2. Merge parsed outputs into page-level JSON
+2. Normalize parsed reports
 3. Export Markdown
-4. Chunk markdown files
-5. Build vector DBs
-6. Process questions and generate answers
+4. Chunk text
+5. Build vector databases
+6. Process questions and write answers
 
-You can control stage execution through settings in `src/pipeline.py`.
-
-Run the Streamlit UI:
+### Option B: UI mode
 
 ```bash
 streamlit run .\app.py
 ```
 
-Default URL: `http://localhost:8501`
+After startup, use the URL printed in your terminal (usually localhost on port 8501).
 
-UI features:
+## Data
 
-- Automatic multi-dataset discovery from `data/*`
-- Full-corpus or company-scoped retrieval
-- LLM reranking enabled by default (toggle-able)
-- Answer panel + debug panel (params, elapsed time, raw JSON)
+Example dataset: `data/stock_data/`
 
----
+- `questions.json` for input questions
+- `pdf_reports/` as source PDFs
+- `answers_*.json` as sample outputs
 
-## 6. Stability Improvements Included
+Intermediate artifacts (`debug_data`, `databases`, etc.) are ignored by `.gitignore` by default.
 
-Recent fixes include:
+## Current status
 
-- Provider alignment for embeddings (avoid unintended DashScope fallback)
-- Input compatibility for both `text/kind` and `question/schema`
-- Retrieval fallback when `content.pages` is missing
-- Reranking failure fallback (pipeline continues instead of crashing)
-- Agicto support for reranking path
+This repo has been hardened with recent fixes including:
 
----
+- Provider alignment across embedding / reranking / QA
+- Compatibility for both `text/kind` and `question/schema`
+- Fallback handling when `pages` is missing
+- Reranking failure degradation instead of hard crash
+- Streamlit UI with multi-dataset support and debug panel
 
-## 7. FAQ
+## Scope and limitations
 
-### Q1: `subset.csv not found ... fallback to new_challenge_pipeline=False`
-This is a compatibility fallback message. It is expected in datasets that only provide `questions.json` with `text/kind` fields.
+This repository currently prioritizes practical execution and debugging over full production engineering.
 
-### Q2: Why do I still see DashScope-related errors?
-Usually one sub-path (often reranking) is still using a default provider. Check `RERANK_PROVIDER`, `EMBEDDING_PROVIDER`, and runtime defaults.
+For production adoption, consider adding:
 
-```bash
-git remote set-url origin git@github.com:<your-username>/<repo>.git
-git push -u origin main
-```
-
----
-
-## 8. Notes
-
-This project currently prioritizes **practical execution and debugging** over strict production architecture. For next-step improvements, consider:
-
-- Unified provider/config abstraction
-- Better tracing/metrics
-- Minimal regression tests for the full pipeline
+- Test coverage and regression baselines
+- Logging/observability/tracing
+- Centralized config and secret management
+- More granular resilience and retry policies
