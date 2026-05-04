@@ -468,9 +468,9 @@ class BaseGeminiProcessor:
             raise Exception(f"API request failed after retries: {str(e)}")
 
 
-# modified by gq [2026-04-28：新增Kimi和Minimax作为OpenAI兼容模型供应商]
+# modified by gq [2026-05-02：新增Agicto作为OpenAI兼容模型供应商]
 class APIProcessor:
-    def __init__(self, provider: Literal["openai", "ibm", "gemini", "dashscope", "kimi", "minimax"] ="dashscope"):
+    def __init__(self, provider: Literal["openai", "ibm", "gemini", "dashscope", "kimi", "minimax", "agicto"] ="dashscope"):
         self.provider = provider.lower()
         if self.provider == "openai":
             self.processor = BaseOpenaiProcessor()
@@ -496,6 +496,16 @@ class APIProcessor:
                 default_model_env="MINIMAX_MODEL",
                 default_model="MiniMax-Text-01"
             )
+        elif self.provider == "agicto":
+            # add by gq [2026-05-02：接入Agicto OpenAI兼容Chat接口]
+            self.processor = BaseOpenAICompatibleProcessor(
+                api_key_env="AGICTO_API_KEY",
+                base_url_env="AGICTO_BASE_URL",
+                default_base_url="https://api.agicto.cn/v1",
+                default_model_env="AGICTO_CHAT_MODEL",
+                default_model="gpt-4o"
+            )
+            # add end
         else:
             raise ValueError(f"Unsupported API provider: {self.provider}")
     # mod end
@@ -553,7 +563,7 @@ class APIProcessor:
     def _build_rag_context_prompts(self, schema):
         """Return prompts tuple for the given schema."""
         # add by gq [2026-04-28：Kimi和Minimax依赖提示词JSON Schema约束结构化输出]
-        use_schema_prompt = True if self.provider in {"ibm", "gemini", "kimi", "minimax", "dashscope"} else False
+        use_schema_prompt = True if self.provider in {"ibm", "gemini", "kimi", "minimax", "agicto", "dashscope"} else False
         # add end
         
         if schema == "name":

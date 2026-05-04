@@ -54,17 +54,45 @@ class BM25Ingestor:
 
 # VectorDBIngestor：向量库构建与保存工具
 class VectorDBIngestor:
-    def __init__(self):
-        # modified by gq [2026-04-30：强制读取项目.env覆盖旧进程环境变量]
+    def __init__(self, embedding_provider: str = "dashscope"):
+        # modified by gq [2026-05-02：支持通过OpenAI兼容接口切换Agicto等embedding平台]
         load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
-        dashscope_api_key = os.getenv("DASHSCOPE_API_KEY")
-        if not dashscope_api_key:
-            raise ValueError("未找到DASHSCOPE_API_KEY，请在项目.env文件或当前终端环境变量中配置DashScope API Key。")
-        dashscope.api_key = dashscope_api_key
+        self.embedding_provider = embedding_provider.lower()
+        self.embedding_model = os.getenv("EMBEDDING_MODEL")
+        self.openai_client = None
+
+        if self.embedding_provider == "dashscope":
+            dashscope_api_key = os.getenv("DASHSCOPE_API_KEY")
+            if not dashscope_api_key:
+                raise ValueError("未找到DASHSCOPE_API_KEY，请在项目.env文件或当前终端环境变量中配置DashScope API Key。")
+            dashscope.api_key = dashscope_api_key
+            self.embedding_model = self.embedding_model or "text-embedding-v1"
+        elif self.embedding_provider == "agicto":
+            agicto_api_key = os.getenv("AGICTO_API_KEY")
+            if not agicto_api_key:
+                raise ValueError("未找到AGICTO_API_KEY，请在项目.env文件或当前终端环境变量中配置Agicto API Key。")
+            self.openai_client = OpenAI(
+                api_key=agicto_api_key,
+                base_url=os.getenv("AGICTO_BASE_URL", "https://api.agicto.cn/v1"),
+                timeout=None,
+                max_retries=2
+            )
+            self.embedding_model = os.getenv("AGICTO_EMBEDDING_MODEL", self.embedding_model or "text-embedding-ada-002")
+        elif self.embedding_provider == "openai":
+            openai_api_key = os.getenv("OPENAI_API_KEY")
+            if not openai_api_key:
+                raise ValueError("未找到OPENAI_API_KEY，请在项目.env文件或当前终端环境变量中配置OpenAI API Key。")
+            self.openai_client = OpenAI(api_key=openai_api_key, timeout=None, max_retries=2)
+            self.embedding_model = self.embedding_model or "text-embedding-3-large"
+        else:
+            raise ValueError(f"不支持的embedding provider: {self.embedding_provider}")
         # mod end
 
     @retry(wait=wait_fixed(20), stop=stop_after_attempt(2))
-    def _get_embeddings(self, text: Union[str, List[str]], model: str = "text-embedding-v1") -> List[float]:
+    def _get_embeddings(self, text: Union[str, List[str]], model: str = None) -> List[float]:
+        # modified by gq [2026-05-02：按配置选择DashScope或OpenAI兼容embedding接口]
+        model = model or self.embedding_model
+        # mod end
         # 获取文本或文本块的嵌入向量，支持重试（使用阿里云DashScope，分批处理）
         if isinstance(text, str) and not text.strip():
             raise ValueError("Input text cannot be an empty string.")
@@ -89,8 +117,18 @@ class VectorDBIngestor:
         LOG_FILE = 'embedding_error.log'
         for i in range(0, len(text_chunks), MAX_BATCH_SIZE):
             batch = text_chunks[i:i+MAX_BATCH_SIZE]
+            # modified by gq [2026-05-02：OpenAI兼容embedding平台使用OpenAI SDK创建向量]
+            if self.embedding_provider in {"agicto", "openai"}:
+                response = self.openai_client.embeddings.create(
+                    model=model,
+                    input=batch,
+                    encoding_format="float"
+                )
+                embeddings.extend([item.embedding for item in response.data])
+                continue
+            # mod end
             resp = TextEmbedding.call(
-                model=TextEmbedding.Models.text_embedding_v1,
+                model=model,
                 input=batch
             )
             # print('i=',i)

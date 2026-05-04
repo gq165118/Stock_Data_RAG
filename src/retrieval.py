@@ -41,7 +41,8 @@ class BM25Retriever:
         # 获取文档内容和BM25索引
         document = document
         chunks = document["content"]["chunks"]
-        pages = document["content"]["pages"]
+        pages = document["content"].get("pages", [])
+        page_map = {p.get("page"): p for p in pages if isinstance(p, dict) and p.get("page") is not None}  # modified by gq [2026-05-04：兼容仅含chunks的文档结构，避免pages缺失导致KeyError]
         
         # 计算BM25分数
         tokenized_query = query.split()
@@ -56,7 +57,7 @@ class BM25Retriever:
         for index in top_indices:
             score = round(float(scores[index]), 4)
             chunk = chunks[index]
-            parent_page = next(page for page in pages if page["page"] == chunk["page"])
+            parent_page = page_map.get(chunk.get("page"), {"page": chunk.get("page"), "text": chunk.get("text", "")})
             
             if return_parent_pages:
                 if parent_page["page"] not in seen_pages:
@@ -80,46 +81,60 @@ class BM25Retriever:
 
 
 class VectorRetriever:
-    def __init__(self, vector_db_dir: Path, documents_dir: Path, embedding_provider: str = "dashscope"):
+    def __init__(self, vector_db_dir: Path, documents_dir: Path, embedding_provider: str = None):
         # 初始化向量检索器，加载所有向量库和文档
         self.vector_db_dir = vector_db_dir
         self.documents_dir = documents_dir
         self.all_dbs = self._load_dbs()
-        # 默认使用 dashscope 作为 embedding provider
-        self.embedding_provider = embedding_provider.lower()
+        # modified by gq [2026-05-02：支持通过.env统一配置检索embedding平台]
+        load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
+        self.embedding_provider = (embedding_provider or os.getenv("EMBEDDING_PROVIDER", "dashscope")).lower()
+        # mod end
         self.llm = self._set_up_llm()
 
     def _set_up_llm(self):
-        # 根据 embedding_provider 初始化对应的 LLM 客户端
-        # modified by gq [2026-04-30：强制读取项目.env覆盖旧进程环境变量]
+        # Initialize embedding client by provider.
+        # modified by gq [2026-05-02: support Agicto OpenAI-compatible embeddings]
         load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
-        # mod end
         if self.embedding_provider == "openai":
-            llm = OpenAI(
+            self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-large")
+            return OpenAI(
                 api_key=os.getenv("OPENAI_API_KEY"),
                 timeout=None,
                 max_retries=2
             )
-            return llm
+        elif self.embedding_provider == "agicto":
+            self.embedding_model = os.getenv("AGICTO_EMBEDDING_MODEL", os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002"))
+            return OpenAI(
+                api_key=os.getenv("AGICTO_API_KEY"),
+                base_url=os.getenv("AGICTO_BASE_URL", "https://api.agicto.cn/v1"),
+                timeout=None,
+                max_retries=2
+            )
         elif self.embedding_provider == "dashscope":
             import dashscope
             dashscope.api_key = os.getenv("DASHSCOPE_API_KEY")
-            return None  # dashscope 不需要 client 对象
+            self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-v1")
+            return None
         else:
-            raise ValueError(f"不支持的 embedding provider: {self.embedding_provider}")
+            raise ValueError(f"Unsupported embedding provider: {self.embedding_provider}")
+        # mod end
 
     def _get_embedding(self, text: str):
-        # 根据 embedding_provider 获取文本的向量表示
-        if self.embedding_provider == "openai":
+        # modified by gq [2026-05-02: support Agicto/OpenAI-compatible query embeddings]
+        if self.embedding_provider in {"openai", "agicto"}:
             embedding = self.llm.embeddings.create(
                 input=text,
-                model="text-embedding-3-large"
+                model=self.embedding_model,
+                encoding_format="float"
             )
             return embedding.data[0].embedding
-        elif self.embedding_provider == "dashscope":
+        # mod end
+        # 根据 embedding_provider 获取文本的向量表示
+        if self.embedding_provider == "dashscope":
             import dashscope
             rsp = dashscope.TextEmbedding.call(
-                model="text-embedding-v1",
+                model=self.embedding_model,
                 input=[text]
             )
             # add by gq [2026-04-30：提前暴露DashScope异常响应，避免NoneType掩盖真实错误]
@@ -244,7 +259,10 @@ class VectorRetriever:
         document = target_report["document"]
         vector_db = target_report["vector_db"]
         chunks = document["content"]["chunks"]
-        pages = document["content"]["pages"]
+        # modified by gq [2026-05-04：兼容仅含chunks的文档结构，避免pages缺失导致KeyError]
+        pages = document["content"].get("pages", [])
+        page_map = {p.get("page"): p for p in pages if isinstance(p, dict) and p.get("page") is not None}
+        # mod end
         
         actual_top_n = min(top_n, len(chunks))
         
@@ -259,7 +277,7 @@ class VectorRetriever:
         for distance, index in zip(distances[0], indices[0]):
             distance = round(float(distance), 4)
             chunk = chunks[index]
-            parent_page = next(page for page in pages if page["page"] == chunk["page"])
+            parent_page = page_map.get(chunk.get("page"), {"page": chunk.get("page"), "text": chunk.get("text", "")})
             if return_parent_pages:
                 if parent_page["page"] not in seen_pages:
                     seen_pages.add(parent_page["page"])
@@ -289,7 +307,8 @@ class VectorRetriever:
             document = report["document"]
             vector_db = report["vector_db"]
             chunks = document["content"]["chunks"]
-            pages = document["content"]["pages"]
+            pages = document["content"].get("pages", [])  # modified by gq [2026-05-04：兼容仅含chunks的文档结构，避免pages缺失导致KeyError]
+            page_map = {p.get("page"): p for p in pages if isinstance(p, dict) and p.get("page") is not None}  # add by gq [2026-05-04：构建页码映射用于父页回退]
             actual_top_n = min(top_n, len(chunks))
             if actual_top_n == 0:
                 continue
@@ -298,7 +317,7 @@ class VectorRetriever:
             seen_pages = set()
             for distance, index in zip(distances[0], indices[0]):
                 chunk = chunks[index]
-                parent_page = next(page for page in pages if page["page"] == chunk["page"])
+                parent_page = page_map.get(chunk.get("page"), {"page": chunk.get("page"), "text": chunk.get("text", "")})
                 if return_parent_pages:
                     if parent_page["page"] in seen_pages:
                         continue
@@ -322,11 +341,14 @@ class VectorRetriever:
         all_pages = []
         for report in self.all_dbs:
             document = report["document"]
-            for page in sorted(document["content"]["pages"], key=lambda p: p["page"]):
+            pages = document["content"].get("pages", [])  # modified by gq [2026-05-04：兼容仅含chunks的文档结构，避免全量检索时报错]
+            if not pages:
+                pages = [{"page": c.get("page"), "text": c.get("text", "")} for c in document["content"].get("chunks", [])]
+            for page in sorted(pages, key=lambda p: p.get("page") or 0):
                 all_pages.append({
                     "distance": 0.5,
-                    "page": page["page"],
-                    "text": page["text"],
+                    "page": page.get("page"),
+                    "text": page.get("text", ""),
                     "report": report["name"],
                     "company_name": document.get("metainfo", {}).get("company_name", report["name"])
                 })
@@ -350,7 +372,9 @@ class VectorRetriever:
             raise ValueError(f"No report found with '{company_name}' company name.")
         
         document = target_report["document"]
-        pages = document["content"]["pages"]
+        pages = document["content"].get("pages", [])  # modified by gq [2026-05-04：兼容仅含chunks的文档结构，避免pages缺失导致KeyError]
+        if not pages:
+            pages = [{"page": c.get("page"), "text": c.get("text", "")} for c in document["content"].get("chunks", [])]
         
         all_pages = []
         for page in sorted(pages, key=lambda p: p["page"]):
@@ -366,8 +390,12 @@ class VectorRetriever:
 
 class HybridRetriever:
     def __init__(self, vector_db_dir: Path, documents_dir: Path):
+        # modified by gq [2026-05-04：重排provider支持从环境变量读取并默认走agicto]
+        load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=True)
+        rerank_provider = os.getenv("RERANK_PROVIDER") or os.getenv("EMBEDDING_PROVIDER", "agicto")
         self.vector_retriever = VectorRetriever(vector_db_dir, documents_dir)
-        self.reranker = LLMReranker()
+        self.reranker = LLMReranker(provider=rerank_provider)
+        # mod end
         
     def retrieve_by_company_name(
         self, 

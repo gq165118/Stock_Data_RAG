@@ -5,6 +5,7 @@ from pyprojroot import here
 import logging
 import json
 import pandas as pd
+import os
 
 from src.pdf_parsing import PDFParser
 from src.parsed_reports_merging import PageTextPreparation
@@ -209,9 +210,11 @@ class Pipeline:
         _ = include_serialized_tables
         text_splitter = TextSplitter()
         text_splitter.split_markdown_reports(
-            self.paths.reports_markdown_path,
-            self.paths.documents_dir,
-            metadata_dir=self.paths.merged_reports_path
+            all_md_dir=self.paths.reports_markdown_path,
+            output_dir=self.paths.documents_dir,
+            chunk_size=30,
+            chunk_overlap=5,
+            subset_csv=self.paths.subset_path if self.paths.subset_path.exists() else None
         )
         print(f"Chunked reports saved to {self.paths.documents_dir}")
     # mod end
@@ -221,7 +224,7 @@ class Pipeline:
         input_dir = self.paths.documents_dir
         output_dir = self.paths.vector_db_dir
         
-        vdb_ingestor = VectorDBIngestor()
+        vdb_ingestor = VectorDBIngestor(embedding_provider=os.getenv("EMBEDDING_PROVIDER", "dashscope"))  # modified by gq [2026-05-04：按环境变量切换embedding provider，避免默认走DashScope]
         vdb_ingestor.process_reports(input_dir, output_dir)
         print(f"Vector databases created in {output_dir}")
     
@@ -285,12 +288,17 @@ class Pipeline:
             counter += 1
 
     def process_questions(self):
+        # modified by gq [2026-05-04：subset.csv缺失时降级为非new_challenge模式，避免FileNotFoundError]
+        use_new_challenge_pipeline = self.paths.subset_path.exists()
+        if not use_new_challenge_pipeline:
+            print(f"subset.csv not found at {self.paths.subset_path}, fallback to new_challenge_pipeline=False")
+
         processor = QuestionsProcessor(
             vector_db_dir=self.paths.vector_db_dir,
             documents_dir=self.paths.documents_dir,
             questions_file_path=self.paths.questions_file_path,
-            new_challenge_pipeline=True,
-            subset_path=self.paths.subset_path,
+            new_challenge_pipeline=use_new_challenge_pipeline,
+            subset_path=self.paths.subset_path if use_new_challenge_pipeline else None,
             parent_document_retrieval=self.run_config.parent_document_retrieval,
             llm_reranking=self.run_config.llm_reranking,
             llm_reranking_sample_size=self.run_config.llm_reranking_sample_size,
@@ -298,11 +306,12 @@ class Pipeline:
             parallel_requests=self.run_config.parallel_requests,
             api_provider=self.run_config.api_provider,
             answering_model=self.run_config.answering_model,
-            full_context=self.run_config.full_context            
+            full_context=self.run_config.full_context
         )
-        
+        # mod end
+
         output_path = self._get_next_available_filename(self.paths.answers_file_path)
-        
+
         _ = processor.process_all_questions(
             output_path=output_path,
             submission_file=self.run_config.submission_file,
@@ -455,6 +464,21 @@ minimax_config = RunConfig(
 )
 # add end
 
+
+# add by gq [2026-05-02：增加Agicto配置，统一使用OpenAI兼容Chat与Embedding接口]
+agicto_config = RunConfig(
+    use_serialized_tables=False,
+    parent_document_retrieval=True,
+    llm_reranking=True,
+    parallel_requests=2,
+    submission_name="Local RAG with Agicto",
+    pipeline_details="Custom pdf parsing + vDB + Router + Parent Document Retrieval + reranking + SO CoT; llm = Agicto OpenAI-compatible model",
+    api_provider="agicto",
+    answering_model=os.getenv("AGICTO_CHAT_MODEL", "gpt-4o"),
+    config_suffix="_agicto"
+)
+# add end
+
 max_nst_o3m_config_big_context = RunConfig(
     use_serialized_tables=False,
     parent_document_retrieval=True,
@@ -504,7 +528,8 @@ configs = {"base": base_config,
            "ibm_llama8b": ibm_llama8b_config, # This one won't work, because ibm api was avaliable only while contest was running
            "gemini_thinking": gemini_thinking_config,
            "kimi": kimi_config,  # add by gq [2026-04-28：允许CLI选择Kimi问答模型]
-           "minimax": minimax_config}  # add by gq [2026-04-28：允许CLI选择Minimax问答模型]
+           "minimax": minimax_config,  # add by gq [2026-04-28：允许CLI选择Minimax问答模型]
+           "agicto": agicto_config}  # add by gq [2026-05-02：允许CLI选择Agicto问答模型]
 
 
 # 你可以直接在本文件中运行任意方法：
@@ -512,48 +537,44 @@ configs = {"base": base_config,
 # 只需取消你想运行的方法的注释即可
 # 你也可以修改 run_config 以尝试不同的配置
 if __name__ == "__main__":
-    # 设置数据集根目录（此处以 test_set 为例）
-    # modified by gq [2026-04-30：恢复使用已完成解析的test_set数据目录]
-    root_path = here() / "data" / "test_set"
-    # mod end
-    #root_path = here("d:") / "test_set-rag"
-    print('root_path:', root_path)
-    #print(type(root_path))
-    # 初始化主流程，使用推荐的最佳配置
-    #pipeline = Pipeline(root_path, run_config=max_nst_o3m_config)
-    pipeline = Pipeline(root_path, run_config=kimi_config)
-    #pipeline = Pipeline(root_path, run_config=minimax_config)
-    
-    # 以下方法可按需取消注释，逐步运行各流程：
-    # 1. 解析PDF报告为结构化JSON，输出到 debug/data_01_parsed_reports
-    #    同时保存docling原始输出到 debug/data_01_parsed_reports_debug（含大量元数据，后续流程不使用）
-    print('1. 解析PDF报告为结构化JSON，输出到 debug/data_01_parsed_reports')
-    #pipeline.parse_pdf_reports_sequential() 
-    
-    # 2. 仅在需要表格序列化配置时调用，
-    #    会在 debug/data_01_parsed_reports 的每个表格中新增 "serialized_table" 字段
-    print('2. 序列化表格，输出到 debug/data_01_parsed_reports')
-    #pipeline.serialize_tables(max_workers=5) 
-    
-    # 3. 将解析后的JSON规整为更简单的每页markdown结构，输出到 debug/data_02_merged_reports
-    print('3. 将解析后的JSON规整为更简单的每页markdown结构，输出到 debug/data_02_merged_reports')
-    #pipeline.merge_reports() 
+    # modified by gq [2026-05-04：支持从指定步骤开始执行]
+    root_path = here() / "data" / "stock_data"
+    print("root_path:", root_path)
 
-    # 4. 导出规整后报告为纯markdown文本，仅用于人工复核或全文检索（如 gemini_thinking_config）
-    #    新文件在 debug/data_03_reports_markdown
-    print('4. 导出规整后报告为纯markdown文本，仅用于人工复核或全文检索（如 gemini_thinking_config）')
-    #pipeline.export_reports_to_markdown() 
-    
-    # 5. 将规整后报告分块，便于后续向量化，输出到 databases/chunked_reports
-    print('5. 将规整后报告分块，便于后续向量化，输出到 databases/chunked_reports')
-    #pipeline.chunk_reports() 
-    
-    # 6. 从分块报告创建向量数据库，输出到 databases/vector_dbs
-    print('6. 从分块报告创建向量数据库，输出到 databases/vector_dbs')
-    #pipeline.create_vector_dbs()     
-    
-    # 7. 处理问题并生成答案，具体逻辑取决于 run_config
-    print('7. 处理问题并生成答案，具体逻辑取决于 run_config')
-    pipeline.process_questions() 
-    
-    print('完成')
+    pipeline = Pipeline(root_path, run_config=agicto_config)
+
+    # add by gq [2026-05-04：设置起跑步骤，1~7]
+    start_step = 7
+    print("start_step:", start_step)
+    # add end
+
+    if start_step <= 1:
+        print("1. 解析PDF报告为结构化JSON，输出到 debug_data/01_parsed_reports")
+        # pipeline.parse_pdf_reports_sequential()
+        pipeline.parse_pdf_reports_with_mineru()
+
+    if start_step <= 2:
+        print("2. 序列化表格，输出到 debug_data/01_parsed_reports")
+        pipeline.serialize_tables(max_workers=5)
+
+    if start_step <= 3:
+        print("3. 将解析后的JSON规整为每页结构，输出到 debug_data/02_merged_reports")
+        pipeline.merge_reports()
+
+    if start_step <= 4:
+        print("4. 导出规整后报告为Markdown，输出到 debug_data/03_reports_markdown")
+        pipeline.export_reports_to_markdown()
+
+    if start_step <= 5:
+        print("5. 将规整后报告分块，输出到 databases/chunked_reports")
+        pipeline.chunk_reports()
+
+    if start_step <= 6:
+        print("6. 从分块报告创建向量数据库，输出到 databases/vector_dbs")
+        pipeline.create_vector_dbs()
+
+    if start_step <= 7:
+        print("7. 处理问题并生成答案")
+        pipeline.process_questions()
+
+    print("完成")

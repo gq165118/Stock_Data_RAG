@@ -202,6 +202,10 @@ class QuestionsProcessor:
         return found_companies
 
     def process_question(self, question: str, schema: str):
+        # modified by gq [2026-05-04：增强入参兜底，避免None触发正则或in判断异常]
+        question = question if isinstance(question, str) else ""
+        schema = schema if isinstance(schema, str) and schema else "string"
+        # mod end
         # 处理单个问题，支持多公司比较
         if self.new_challenge_pipeline:
             extracted_companies = self._extract_companies_from_subset(question)
@@ -295,15 +299,17 @@ class QuestionsProcessor:
 
     def _process_single_question(self, question_data: dict) -> dict:
         question_index = question_data.get("_question_index", 0)
-        
-        if self.new_challenge_pipeline:
-            question_text = question_data.get("text")
-            schema = question_data.get("kind")
-        else:
-            question_text = question_data.get("question")
-            schema = question_data.get("schema")
+
+        # modified by gq [2026-05-04：兼容text/kind与question/schema两套问题字段，避免NoneType报错]
+        question_text = question_data.get("text") or question_data.get("question")
+        schema = question_data.get("kind") or question_data.get("schema")
+        # mod end
         try:
             answer_dict = self.process_question(question_text, schema)
+            # modified by gq [2026-05-04：兼容下游返回None，避免“argument of type NoneType is not iterable”]
+            if not isinstance(answer_dict, dict):
+                raise TypeError(f"process_question returned non-dict result: {type(answer_dict).__name__}")
+            # mod end
             
             if "error" in answer_dict:
                 detail_ref = self._create_answer_detail_ref({

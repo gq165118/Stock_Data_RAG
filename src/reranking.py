@@ -36,10 +36,14 @@ class JinaReranker:
 
 # LLMReranker：基于大模型的重排器，支持单条和批量重排
 class LLMReranker:
-    def __init__(self, provider: str = "dashscope"):
-        # 支持 openai/dashscope，默认 dashscope
+    # modified by gq [2026-05-04：默认重排provider改为agicto并复用OpenAI兼容接口]
+    def __init__(self, provider: str = "agicto"):
+        # 支持 openai/agicto/dashscope，默认 agicto
         self.provider = provider.lower()
         self.llm = self.set_up_llm()
+        load_dotenv()
+        self.rerank_model = os.getenv("RERANK_MODEL") or os.getenv("AGICTO_CHAT_MODEL") or "deepseek-v4-flash"
+        # mod end
         self.system_prompt_rerank_single_block = prompts.RerankingPrompt.system_prompt_rerank_single_block
         self.system_prompt_rerank_multiple_blocks = prompts.RerankingPrompt.system_prompt_rerank_multiple_blocks
         self.schema_for_single_block = prompts.RetrievalRankingSingleBlock
@@ -50,6 +54,11 @@ class LLMReranker:
         load_dotenv()
         if self.provider == "openai":
             return OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        elif self.provider == "agicto":
+            return OpenAI(
+                api_key=os.getenv("AGICTO_API_KEY"),
+                base_url=os.getenv("AGICTO_BASE_URL", "https://api.agicto.cn/v1")
+            )
         elif self.provider == "dashscope":
             import dashscope
             dashscope.api_key = os.getenv("DASHSCOPE_API_KEY")
@@ -60,9 +69,9 @@ class LLMReranker:
     def get_rank_for_single_block(self, query, retrieved_document):
         # 针对单个文本块，调用LLM进行相关性评分
         user_prompt = f'/nHere is the query:/n"{query}"/n/nHere is the retrieved text block:/n"""/n{retrieved_document}/n"""/n'
-        if self.provider == "openai":
+        if self.provider in {"openai", "agicto"}:
             completion = self.llm.beta.chat.completions.parse(
-                model="gpt-4o-mini-2024-07-18",
+                model=self.rerank_model,
                 temperature=0,
                 messages=[
                     {"role": "system", "content": self.system_prompt_rerank_single_block},
@@ -106,9 +115,9 @@ class LLMReranker:
             f"{formatted_blocks}\n\n"
             f"You should provide exactly {len(retrieved_documents)} rankings, in order."
         )
-        if self.provider == "openai":
+        if self.provider in {"openai", "agicto"}:
             completion = self.llm.beta.chat.completions.parse(
-                model="gpt-4o-mini-2024-07-18",
+                model=self.rerank_model,
                 temperature=0,
                 messages=[
                     {"role": "system", "content": self.system_prompt_rerank_multiple_blocks},
@@ -162,13 +171,20 @@ class LLMReranker:
         if documents_batch_size == 1:
             def process_single_doc(doc):
                 # 单文档重排
-                ranking = self.get_rank_for_single_block(query, doc['text'])
+                try:
+                    ranking = self.get_rank_for_single_block(query, doc['text'])
+                    relevance_score = ranking.get("relevance_score", 0.0)
+                except Exception as err:
+                    # modified by gq [2026-05-04：LLM重排异常时降级为仅向量分数，避免整批失败]
+                    print(f"LLM reranking fallback (single doc): {err}")
+                    relevance_score = 0.0
+                    # mod end
                 
                 doc_with_score = doc.copy()
-                doc_with_score["relevance_score"] = ranking["relevance_score"]
+                doc_with_score["relevance_score"] = relevance_score
                 # 计算融合分数，distance越小越相关
                 doc_with_score["combined_score"] = round(
-                    llm_weight * ranking["relevance_score"] + 
+                    llm_weight * relevance_score + 
                     vector_weight * doc['distance'],
                     4
                 )
@@ -182,9 +198,15 @@ class LLMReranker:
             def process_batch(batch):
                 # 批量重排
                 texts = [doc['text'] for doc in batch]
-                rankings = self.get_rank_for_multiple_blocks(query, texts)
+                try:
+                    rankings = self.get_rank_for_multiple_blocks(query, texts)
+                    block_rankings = rankings.get('block_rankings', []) if isinstance(rankings, dict) else []
+                except Exception as err:
+                    # modified by gq [2026-05-04：LLM重排异常时降级为默认分数，避免整批失败]
+                    print(f"LLM reranking fallback (batch): {err}")
+                    block_rankings = []
+                    # mod end
                 results = []
-                block_rankings = rankings.get('block_rankings', [])
                 
                 if len(block_rankings) < len(batch):
                     print(f"\nWarning: Expected {len(batch)} rankings but got {len(block_rankings)}")
